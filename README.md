@@ -1,94 +1,180 @@
-# 🔮 Obsidian Graph Widget
+# Obsidian Desktop Widget
 
-A floating, transparent desktop graph for your Obsidian vault. Always on top, click-through by default — your knowledge graph lives on your desktop without getting in the way.
-
----
+A floating, transparent desktop graph for your Obsidian vault. The widget runs as an Electron app, stays on top of your desktop, and can be click-through by default so it does not get in the way.
 
 ## Features
 
-- **Full Graph** — all notes in your vault, force-directed, Obsidian-styled
-- **Local Graph** — select any note and see its direct neighbors
-- **Focus Mode** — current note + backlinks + notes edited in the last 7 days
-- Transparent, always-on-top window (click-through by default)
-- Live node drag, zoom & pan
-- Hover tooltips with link count, edit recency, tags
-- Auto-saves vault path between sessions
+- Full graph view for all notes in your vault
+- Local graph mode for a selected note and its direct neighbors
+- Focus mode for the current note, backlinks, and recently edited notes
+- Transparent, always-on-top desktop window
+- Click-through mode with an interact toggle
+- Live node drag, zoom, and pan
+- Hover tooltips with link count, recency, and tags
+- Saves your selected vault path between sessions
 
----
+## Project structure
 
-## Setup
+This repository is the Electron app folder. These files need to stay together in the same folder:
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) v18+
-- Your Obsidian vault folder (with `.md` files using `[[wikilinks]]`)
+```text
+obsidian-desktop-widget/
+|-- main.js              # Electron main process
+|-- preload.js           # Secure bridge between Electron and the UI
+|-- package.json         # Node/Electron dependencies and scripts
+|-- package-lock.json    # Locked dependency versions
+|-- src/
+|   |-- index.html       # App UI
+|   `-- renderer.js      # Graph rendering and vault parsing logic
+|-- launch.bat           # Windows launcher helper
+|-- launch.vbs           # Windows no-console launcher helper
+`-- create-shortcut.ps1  # Optional Windows shortcut script
+```
 
-### Install & Run
+Do not copy only `src/` or only the Electron files somewhere else. Run `npm install` and `npm start` from the folder that contains `package.json`, `main.js`, and `preload.js`.
+
+`node_modules/` is intentionally not included in GitHub. It is recreated locally by running `npm install`.
+
+## Requirements
+
+- [Node.js](https://nodejs.org/) 18 or newer
+- npm, included with Node.js
+- An Obsidian vault folder containing Markdown files
+
+## Install and run
+
+Clone the repository:
 
 ```bash
-# Clone or unzip this folder, then:
-cd obsidian-graph-widget
+git clone https://github.com/adityagahlot/obsidian-desktop-widget.git
+cd obsidian-desktop-widget
+```
+
+Install dependencies:
+
+```bash
 npm install
+```
+
+Start the Electron app:
+
+```bash
 npm start
 ```
 
-On first launch, a setup screen appears — click **Select Vault Folder** and point it at your Obsidian vault.
+On first launch, choose your Obsidian vault folder when prompted.
 
----
+## Troubleshooting Electron install on Windows
+
+If `npm install` finishes but `npm start` fails because Electron did not download correctly, you can install the Electron binary manually.
+
+First, check the Electron version used by this project:
+
+```powershell
+Get-Content node_modules\electron\package.json
+```
+
+Look for the `version` field.
+
+Then:
+
+1. Go to [Electron releases](https://github.com/electron/electron/releases).
+2. Find the release that matches the version in `node_modules\electron\package.json`.
+3. Download the Windows x64 zip file named like `electron-vXX.X.X-win32-x64.zip`.
+4. Unzip it.
+5. Place the unzipped contents inside this folder:
+
+```text
+node_modules\electron\dist\
+```
+
+The folder should contain `electron.exe` directly inside `dist`.
+
+Finally, create this file:
+
+```text
+node_modules\electron\path.txt
+```
+
+Put only this text inside it:
+
+```text
+electron.exe
+```
+
+Then run:
+
+```bash
+npm start
+```
+
+## Running from a downloaded ZIP
+
+If you download the project as a ZIP from GitHub:
+
+1. Extract the ZIP.
+2. Open a terminal inside the extracted folder that contains `package.json`.
+3. Run `npm install`.
+4. Run `npm start`.
+
+If you see a nested folder after extracting, open the inner project folder before running the commands.
 
 ## Controls
 
 | Area | Action |
-|---|---|
-| Hover window | Shows control panel + legend |
-| **Full / Local / Focus** buttons | Switch graph mode |
-| Search box (Local/Focus modes) | Find and select a note |
-| ↺ Refresh | Re-read vault from disk |
-| ⊙ Click-thru / Interact | Toggle mouse interaction |
-| ⌂ Vault | Change vault folder |
-| ✕ | Close |
-| Drag nodes | Reposition |
-| Scroll | Zoom in/out |
-| Click + drag background | Pan |
+| --- | --- |
+| Hover window | Shows the control panel and legend |
+| Full / Local / Focus buttons | Switch graph mode |
+| Search box | Find and select a note in Local or Focus mode |
+| Refresh | Re-read the vault from disk |
+| Click-thru / Interact | Toggle mouse interaction |
+| Vault | Change the selected vault folder |
+| Close | Close the app |
+| Drag nodes | Reposition nodes |
+| Scroll | Zoom in or out |
+| Click and drag background | Pan the graph |
 
-### Click-Through Mode
+## Click-through mode
 
-When **Click-thru** is active (default), your desktop clicks pass through the window. Hover over the window to reveal the panel and interact with it. Switch to **Interact** mode to drag nodes and click freely.
+When click-through mode is active, desktop clicks pass through the widget. Switch to Interact mode when you want to drag nodes, click controls, or move around the graph.
 
----
-
-## Color Legend
+## Color legend
 
 | Color | Meaning |
-|---|---|
-| ⚫ Grey | Regular note |
-| 🟣 Purple | Selected / center note |
-| 🔵 Blue | Tagged note |
-| 🟢 Green | Modified in last 7 days |
+| --- | --- |
+| Grey | Regular note |
+| Purple | Selected or center note |
+| Blue | Tagged note |
+| Green | Modified in the last 7 days |
 
----
+## Build optional installers
 
-## Build (optional)
+Package for the current platform:
 
 ```bash
-# Package for current platform
 npm run build
+```
 
-# Windows installer
+Windows installer:
+
+```bash
 npm run build:win
+```
 
-# macOS DMG
+macOS DMG:
+
+```bash
 npm run build:mac
 ```
 
-Built files appear in `dist/`.
-
----
+Build output is written to `dist/`.
 
 ## How it reads your vault
 
-The widget scans all `.md` files recursively and extracts:
-- `[[wikilinks]]` → graph edges
-- `#tags` and frontmatter tags → node color
-- File `mtime` → recency highlighting
+The widget scans Markdown files recursively and extracts:
 
-No internet connection needed. Your data never leaves your machine.
+- `[[wikilinks]]` for graph edges
+- `#tags` and frontmatter tags for node styling
+- File modified times for recency highlighting
+
+Your vault data stays on your machine. The app does not need an internet connection to read your notes.
