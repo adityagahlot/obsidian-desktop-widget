@@ -2,6 +2,17 @@ const { app, BrowserWindow, ipcMain, screen, dialog, shell, nativeImage, Tray, M
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { buildGraph, resolveLinks, scanVaultAsync, scanVaultIncrementalAsync, makeNode, relId } = require('./lib/parser');
+
+// ─── Logging (file: %APPDATA%/Obsidian Graph Widget/logs/main.log) ─
+let log = console;
+try {
+  log = require('electron-log/main');
+  log.initialize();
+  log.transports.file.level = 'info';
+  log.transports.console.level = app.isPackaged ? false : 'info';
+  log.errorHandler.startCatching(); // uncaught exceptions + rejections → log file
+} catch (e) { /* logging is best-effort */ }
 
 let mainWindow;
 let tray = null;
@@ -76,82 +87,106 @@ function getStartup() {
   return false;
 }
 
-// ─── Vault parser (READ-ONLY — never writes to vault) ─────────────
-function parseVault(vaultDir) {
-  const nodes = [];
-  const nodeMap = new Map();
+// ─── Graph state, cache & incremental parsing ─────────────────────
+// (Parsing itself lives in lib/parser.js — pure and unit-tested.)
+let graphState = null;          // { nodes, links } — single source of truth
+let parseInFlight = null;
 
-  function walk(dir) {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-    catch (e) { return; }
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) { walk(fullPath); continue; }
-      if (!entry.name.endsWith('.md')) continue;
-
-      const id = path.relative(vaultDir, fullPath).replace(/\\/g, '/');
-      const name = entry.name.replace(/\.md$/, '');
-      let stat = { mtimeMs: 0, ctimeMs: 0, size: 0 };
-      try { stat = fs.statSync(fullPath); } catch(e) {}
-
-      // Read ONLY — fs.readFileSync with no write anywhere
-      let content = '';
-      try { content = fs.readFileSync(fullPath, 'utf8'); } catch(e) {}
-
-      const tags = [];
-      (content.match(/#[\w/-]+/g) || []).forEach(t => {
-        if (!t.startsWith('#!') && t.length > 1) tags.push(t.slice(1));
-      });
-      const fmMatch = content.match(/^---[\r\n]([\s\S]*?)[\r\n]---/);
-      if (fmMatch) {
-        // YAML list: - tagname
-        const listTags = [...fmMatch[1].matchAll(/^\s*-\s+["']?([^"'\n\r]+)["']?/gm)];
-        listTags.forEach(m => tags.push(m[1].trim()));
-        // Inline: tags: [a, b]
-        const inlineTags = fmMatch[1].match(/^tags:\s*\[([^\]]+)\]/m);
-        if (inlineTags) inlineTags[1].split(',').forEach(t => tags.push(t.trim().replace(/['"]/g, '')));
-      }
-
-      // Word count (approx)
-      const wordCount = content.split(/\s+/).filter(Boolean).length;
-      // Heading
-      const headingMatch = content.match(/^#\s+(.+)/m);
-      const heading = headingMatch ? headingMatch[1].trim() : null;
-
-      nodeMap.set(name.toLowerCase(), id);
-      nodes.push({ id, name, heading, mtime: stat.mtimeMs, size: stat.size, wordCount, tags, content });
-    }
-  }
-
-  walk(vaultDir);
-
-  const links = [];
-  for (const node of nodes) {
-    const wikiLinks = node.content.match(/\[\[([^\]|#\n]+)(?:[|#][^\]\n]*)?\]\]/g) || [];
-    for (const wl of wikiLinks) {
-      const raw = wl.replace(/\[\[([^\]|#\n]+).*\]\]/, '$1').trim().toLowerCase();
-      const targetId = nodeMap.get(raw) ||
-        [...nodeMap.entries()].find(([k]) => k === raw || k.endsWith('/' + raw))?.[1];
-      if (targetId && targetId !== node.id) {
-        links.push({ source: node.id, target: targetId });
-      }
-    }
-    // Strip content from returned data — we only need metadata
-    delete node.content;
-  }
-
-  return { nodes, links };
+function cacheFilePath() {
+  return path.join(app.getPath('userData'), 'graph-cache.json');
 }
 
-// ─── Vault watcher (live refresh) ─────────────────────────────────
+function graphSignature(g) {
+  let mtimeSum = 0;
+  for (const n of g.nodes) mtimeSum += n.mtime;
+  return `${g.nodes.length}:${g.links.length}:${mtimeSum}`;
+}
+
+function loadGraphCache() {
+  try {
+    const c = JSON.parse(fs.readFileSync(cacheFilePath(), 'utf8'));
+    if (c && c.vaultPath === vaultPath && Array.isArray(c.nodes) && Array.isArray(c.links)) {
+      return { nodes: c.nodes, links: c.links };
+    }
+  } catch (e) { /* no/invalid cache is fine */ }
+  return null;
+}
+
+let cacheSaveTimer = null;
+function saveGraphCacheDebounced() {
+  clearTimeout(cacheSaveTimer);
+  cacheSaveTimer = setTimeout(() => {
+    if (!graphState || !vaultPath) return;
+    const payload = JSON.stringify({
+      vaultPath, savedAt: Date.now(),
+      nodes: graphState.nodes, links: graphState.links
+    });
+    fs.writeFile(cacheFilePath(), payload, err => {
+      if (err) log.warn('cache write failed:', err.message);
+    });
+  }, 1500);
+}
+
+async function fullParse() {
+  if (!vaultPath) return null;
+  if (parseInFlight) return parseInFlight;
+  parseInFlight = (async () => {
+    const t0 = Date.now();
+    // Reuse unchanged nodes (mtime match) — only changed files are read.
+    const known = new Map((graphState?.nodes || []).map(n => [n.id, n]));
+    const nodes = known.size
+      ? await scanVaultIncrementalAsync(vaultPath, known)
+      : buildGraph(await scanVaultAsync(vaultPath)).nodes;
+    const g = { nodes, links: resolveLinks(nodes) };
+    log.info(`vault parsed: ${g.nodes.length} notes, ${g.links.length} links in ${Date.now() - t0}ms (${known.size ? 'incremental' : 'full'})`);
+    return g;
+  })().finally(() => { parseInFlight = null; });
+  return parseInFlight;
+}
+
+function notifyRenderer() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('vault-changed');
+  }
+}
+
+// Incremental update: re-parse only the changed files, then re-resolve
+// links from the stored raw targets (no I/O for unchanged notes).
+async function applyFileChanges(changes) {
+  if (!graphState || !vaultPath) { notifyRenderer(); return; }
+  const byId = new Map(graphState.nodes.map(n => [n.id, n]));
+
+  for (const [id, event] of changes) {
+    if (event === 'unlink') {
+      byId.delete(id);
+      continue;
+    }
+    try {
+      const full = path.join(vaultPath, id);
+      const [content, stat] = await Promise.all([
+        fs.promises.readFile(full, 'utf8'),
+        fs.promises.stat(full)
+      ]);
+      byId.set(id, makeNode(id, content, stat));
+    } catch (e) {
+      byId.delete(id); // vanished between event and read
+    }
+  }
+
+  graphState = { nodes: [...byId.values()], links: [] };
+  graphState.links = resolveLinks(graphState.nodes);
+  saveGraphCacheDebounced();
+  notifyRenderer();
+}
+
+// ─── Vault watcher (live refresh, incremental) ────────────────────
 let watcher = null;
 function watchVault(dir) {
   if (watcher) { try { watcher.close(); } catch (e) {} watcher = null; }
   if (!dir) return;
   try {
     const chokidar = require('chokidar');
+    const pending = new Map();   // id → last event
     let debounce = null;
     watcher = chokidar.watch(dir, {
       // skip hidden dirs like .obsidian, .git, .trash
@@ -161,14 +196,16 @@ function watchVault(dir) {
     });
     watcher.on('all', (event, p) => {
       if (!p || !p.endsWith('.md')) return;
+      pending.set(relId(dir, p), event === 'unlink' ? 'unlink' : 'change');
       clearTimeout(debounce);
       debounce = setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('vault-changed');
-        }
-      }, 800);
+        const changes = new Map(pending);
+        pending.clear();
+        applyFileChanges(changes).catch(e => log.warn('incremental update failed:', e.message));
+      }, 600);
     });
-  } catch (e) { /* watcher is best-effort */ }
+    watcher.on('error', e => log.warn('watcher error:', e.message));
+  } catch (e) { log.warn('watcher init failed:', e.message); }
 }
 
 // ─── Read single note content (for preview) ──────────────────────
@@ -194,6 +231,7 @@ ipcMain.handle('select-vault', async () => {
   });
   if (!result.canceled && result.filePaths[0]) {
     vaultPath = result.filePaths[0];
+    graphState = null; // new vault — old graph is invalid
     saveConfig({ vaultPath });
     watchVault(vaultPath);
     return vaultPath;
@@ -202,7 +240,30 @@ ipcMain.handle('select-vault', async () => {
 });
 
 ipcMain.handle('get-vault-path', () => vaultPath);
-ipcMain.handle('load-graph', () => vaultPath ? parseVault(vaultPath) : null);
+
+// Fast path: serve in-memory graph; on cold start serve the disk cache
+// instantly and re-parse in the background (notify only if changed).
+ipcMain.handle('load-graph', async () => {
+  if (!vaultPath) return null;
+  if (graphState) return graphState;
+
+  const cached = loadGraphCache();
+  if (cached) {
+    graphState = cached;
+    const cachedSig = graphSignature(cached);
+    fullParse().then(fresh => {
+      if (!fresh) return;
+      graphState = fresh;
+      saveGraphCacheDebounced();
+      if (graphSignature(fresh) !== cachedSig) notifyRenderer();
+    }).catch(e => log.warn('background reparse failed:', e.message));
+    return graphState;
+  }
+
+  graphState = await fullParse();
+  saveGraphCacheDebounced();
+  return graphState;
+});
 ipcMain.handle('read-note', (_, noteId) => readNoteContent(vaultPath, noteId));
 
 ipcMain.handle('open-in-obsidian', (_, noteId) => {
@@ -293,6 +354,33 @@ ipcMain.handle('check-update', async () => {
 
 ipcMain.handle('open-url', (_, url) => {
   if (typeof url === 'string' && /^https:\/\/github\.com\//.test(url)) shell.openExternal(url);
+});
+
+// ─── Global hotkey (remappable) ───────────────────────────────────
+const DEFAULT_HOTKEY = 'Control+Shift+G';
+let currentHotkey = DEFAULT_HOTKEY;
+
+function registerHotkey(accel) {
+  try {
+    if (currentHotkey) globalShortcut.unregister(currentHotkey);
+  } catch (e) {}
+  try {
+    if (globalShortcut.register(accel, toggleWindow)) {
+      currentHotkey = accel;
+      return true;
+    }
+  } catch (e) { log.warn('hotkey register failed:', e.message); }
+  // restore previous binding
+  try { globalShortcut.register(currentHotkey, toggleWindow); } catch (e) {}
+  return false;
+}
+
+ipcMain.handle('get-hotkey', () => currentHotkey);
+ipcMain.handle('set-hotkey', (_, accel) => {
+  if (typeof accel !== 'string' || !accel || accel.length > 64) return false;
+  const ok = registerHotkey(accel);
+  if (ok) saveConfig({ hotkey: accel });
+  return ok;
 });
 
 // ─── Tray ─────────────────────────────────────────────────────────
@@ -414,8 +502,10 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   watchVault(vaultPath);
-  // Global hotkey: toggle widget visibility
-  globalShortcut.register('Control+Shift+G', toggleWindow);
+  // Global hotkey: toggle widget visibility (remappable via settings)
+  currentHotkey = loadConfig().hotkey || DEFAULT_HOTKEY;
+  try { globalShortcut.register(currentHotkey, toggleWindow); }
+  catch (e) { log.warn('hotkey registration failed:', e.message); }
 });
 app.on('before-quit', () => { isQuitting = true; });
 app.on('will-quit', () => {

@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportPng:         (d) => ipcRenderer.invoke('export-png', d),
   checkUpdate:       ()  => ipcRenderer.invoke('check-update'),
   openUrl:           (u) => ipcRenderer.invoke('open-url', u),
+  getHotkey:         ()  => ipcRenderer.invoke('get-hotkey'),
+  setHotkey:         (a) => ipcRenderer.invoke('set-hotkey', a),
 });

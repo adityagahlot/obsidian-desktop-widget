@@ -1,20 +1,22 @@
 {
   "name": "obsidian-graph-widget",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Floating Obsidian graph widget for desktop",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test",
     "build": "electron-builder",
-    "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac"
+    "build:win": "electron-builder --win --publish never",
+    "build:mac": "electron-builder --mac --publish never"
   },
   "keywords": [],
   "author": "Aditya Gahlot",
   "license": "ISC",
   "dependencies": {
     "chokidar": "^5.0.0",
-    "d3": "^7.9.0"
+    "d3": "^7.9.0",
+    "electron-log": "^5.4.4"
   },
   "devDependencies": {
     "electron": "^42.3.3",
@@ -29,16 +31,26 @@
     "files": [
       "main.js",
       "preload.js",
+      "lib/**/*",
       "src/**/*",
       "assets/**/*",
       "package.json"
     ],
     "win": {
-      "target": "portable",
+      "target": [
+        "portable",
+        "nsis"
+      ],
       "icon": "build/icon.ico"
     },
     "portable": {
       "artifactName": "ObsidianGraphWidget.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "ObsidianGraphWidget-Setup-${version}.${ext}",
+      "shortcutName": "Obsidian Graph Widget"
     },
     "mac": {
       "target": "dmg",

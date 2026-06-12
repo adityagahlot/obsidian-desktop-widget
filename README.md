@@ -1,5 +1,7 @@
 # Obsidian Desktop Widget
 
+[![CI](https://github.com/NimrodLeFay/obsidian-desktop-widget/actions/workflows/ci.yml/badge.svg)](https://github.com/NimrodLeFay/obsidian-desktop-widget/actions/workflows/ci.yml)
+
 A floating, transparent desktop graph for your [Obsidian](https://obsidian.md) vault. The widget runs as an Electron app, lives in your system tray, and visualizes your knowledge graph directly on the desktop.
 
 > Fork of [adityagahlot/obsidian-desktop-widget](https://github.com/adityagahlot/obsidian-desktop-widget) with tray support, working autostart, a portable exe, and a bunch of new features.
@@ -36,11 +38,14 @@ A floating, transparent desktop graph for your [Obsidian](https://obsidian.md) v
 
 ## Installation
 
-### Portable exe (Windows)
+### Windows
 
-Download `ObsidianGraphWidget.exe` from the [latest release](https://github.com/NimrodLeFay/obsidian-desktop-widget/releases/latest) and run it. No installation required.
+From the [latest release](https://github.com/NimrodLeFay/obsidian-desktop-widget/releases/latest):
 
-Note: the exe is unsigned, so Windows SmartScreen may warn on first launch — choose "Run anyway". If you enable "Run on startup", keep the exe where it is (the autostart entry points to its current location).
+- **`ObsidianGraphWidget-Setup-x.x.x.exe`** (recommended) — installer; much faster startup, since the portable exe unpacks itself to a temp folder on every launch
+- **`ObsidianGraphWidget.exe`** — portable, no installation; if you enable "Run on startup", keep the exe where it is
+
+Note: the binaries are unsigned, so Windows SmartScreen may warn on first launch — choose "Run anyway".
 
 ### From source
 

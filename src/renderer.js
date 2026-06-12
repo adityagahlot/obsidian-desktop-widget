@@ -30,6 +30,18 @@ let panelOpacity  = 0.93;
 let _labelSel = null;
 let _linksCopy = [];
 let _nodesCopy = [];
+let _degreeFull = new Map();  // node id → degree across the whole vault
+let _degreeView = new Map();  // node id → degree in the current view
+
+function computeDegrees(links) {
+  const m = new Map();
+  for (const l of links) {
+    const s = lid(l.source), t = lid(l.target);
+    m.set(s, (m.get(s) || 0) + 1);
+    m.set(t, (m.get(t) || 0) + 1);
+  }
+  return m;
+}
 
 // ── Elements ─────────────────────────────────────────────────────
 const svg           = d3.select('#graph');
@@ -110,6 +122,9 @@ async function init() {
     populateFolderFilter();
     setupScreen.classList.add('hidden');
   }
+
+  // Show configured hotkey
+  api.getHotkey().then(a => { document.getElementById('hotkey-btn').textContent = prettyAccel(a); }).catch(() => {});
 
   // Silent update check on launch
   api.checkUpdate().then(upd => {
@@ -282,7 +297,7 @@ function nodeColor(d) {
 
 function nodeRadius(d) {
   const base = d._role === 'center' ? 9 : 3.5;
-  const degree = (graphData?.links || []).filter(l => lid(l.source) === d.id || lid(l.target) === d.id).length;
+  const degree = _degreeFull.get(d.id) || 0;
   return Math.max(base, Math.min(13, base + degree * 0.55)) * nodeScale;
 }
 
@@ -290,6 +305,7 @@ function nodeRadius(d) {
 function draw() {
   if (simulation) simulation.stop();
 
+  _degreeFull = computeDegrees(graphData?.links || []);
   const { nodes, links } = getDisplayData();
 
   // Dedup links
@@ -303,6 +319,7 @@ function draw() {
   const linksCopy = dedupLinks.map(l => ({ source: lid(l.source), target: lid(l.target) }));
   _nodesCopy = nodesCopy;
   _linksCopy = linksCopy;
+  _degreeView = computeDegrees(linksCopy);
 
   const w = window.innerWidth, h = window.innerHeight;
   const isLocal = currentMode !== 'global';
@@ -453,18 +470,16 @@ function resolveLabels(labelSel, nodesCopy, linksCopy) {
   const placed = [];
   const visible = new Set();
 
-  // Priority order: center > high-degree > others
+  // Priority order: center > high-degree > others (O(1) degree lookups)
   const sorted = [...nodesCopy].filter(d => d.x != null).sort((a, b) => {
     if (a._role === 'center') return -1;
     if (b._role === 'center') return 1;
-    const da = linksCopy.filter(l => lid(l.source) === a.id || lid(l.target) === a.id).length;
-    const db = linksCopy.filter(l => lid(l.source) === b.id || lid(l.target) === b.id).length;
-    return db - da;
+    return (_degreeView.get(b.id) || 0) - (_degreeView.get(a.id) || 0);
   });
 
   for (const d of sorted) {
     // Decide if this node wants a label at current zoom
-    const deg = linksCopy.filter(l => lid(l.source) === d.id || lid(l.target) === d.id).length;
+    const deg = _degreeView.get(d.id) || 0;
     const wants = d._role === 'center'
       || currentMode !== 'global'
       || sc > 1.4
@@ -514,7 +529,7 @@ function showTooltip(event, d) {
   tooltipNodeId = d.id;
   const now = Date.now();
   const daysAgo = Math.floor((now - d.mtime) / 86400000);
-  const lc = _linksCopy.filter(l => lid(l.source) === d.id || lid(l.target) === d.id).length;
+  const lc = _degreeView.get(d.id) || 0;
 
   ttName.textContent = d.name;
   ttMeta.innerHTML = [
@@ -970,9 +985,9 @@ document.getElementById('fullscreen-btn').addEventListener('click', async () => 
 // Stay in sync if fullscreen changes from elsewhere
 api.onFullscreenChange(v => { isFullscreen = v; updateFullscreenBtn(); });
 
-// Esc exits fullscreen
+// Esc exits fullscreen (unless a hotkey is being recorded)
 document.addEventListener('keydown', async e => {
-  if (e.key === 'Escape' && isFullscreen) {
+  if (e.key === 'Escape' && isFullscreen && !recordingHotkey) {
     isFullscreen = await api.toggleFullscreen();
     updateFullscreenBtn();
   }
@@ -1184,6 +1199,50 @@ api.onVaultChanged(async () => {
   populateFolderFilter();
   toast('Vault changed — graph refreshed');
 });
+
+// ── Hotkey remap ──────────────────────────────────────────────────
+const hotkeyBtn = document.getElementById('hotkey-btn');
+let recordingHotkey = false;
+
+function prettyAccel(a) { return (a || '').replace('Control', 'Ctrl').replace('CommandOrControl', 'Ctrl'); }
+
+hotkeyBtn.addEventListener('click', () => {
+  if (recordingHotkey) return;
+  recordingHotkey = true;
+  hotkeyBtn.textContent = 'Press keys… (Esc cancels)';
+});
+
+const KEY_MAP = { ' ': 'Space', 'ArrowUp': 'Up', 'ArrowDown': 'Down', 'ArrowLeft': 'Left', 'ArrowRight': 'Right' };
+const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
+
+document.addEventListener('keydown', async e => {
+  if (!recordingHotkey) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (e.key === 'Escape') {
+    recordingHotkey = false;
+    hotkeyBtn.textContent = prettyAccel(await api.getHotkey());
+    return;
+  }
+  if (MODIFIER_KEYS.has(e.key)) return; // wait for the actual key
+
+  const mods = [];
+  if (e.ctrlKey) mods.push('Control');
+  if (e.altKey) mods.push('Alt');
+  if (e.shiftKey) mods.push('Shift');
+  if (e.metaKey) mods.push('Super');
+  if (!mods.length) { toast('Hotkey needs at least one modifier (Ctrl/Alt/Shift)'); return; }
+
+  let key = KEY_MAP[e.key] || e.key;
+  if (key.length === 1) key = key.toUpperCase();
+
+  const accel = [...mods, key].join('+');
+  const ok = await api.setHotkey(accel);
+  recordingHotkey = false;
+  hotkeyBtn.textContent = prettyAccel(ok ? accel : await api.getHotkey());
+  toast(ok ? `Hotkey set: ${prettyAccel(accel)}` : 'Could not register that combination (in use by another app?)');
+}, true);
 
 document.getElementById('vault-btn').addEventListener('click', async () => {
   const p = await api.selectVault();
