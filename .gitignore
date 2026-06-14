@@ -8,3 +8,7 @@ release/
 .env
 .DS_Store
 Thumbs.db
+
+# Local working notes / session handover — never push to the public repo
+CLAUDE.md
+.claude/
