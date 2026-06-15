@@ -1,180 +1,104 @@
 # Obsidian Desktop Widget
 
-A floating, transparent desktop graph for your Obsidian vault. The widget runs as an Electron app, stays on top of your desktop, and can be click-through by default so it does not get in the way.
+[![CI](https://github.com/NimrodLeFay/obsidian-desktop-widget/actions/workflows/ci.yml/badge.svg)](https://github.com/NimrodLeFay/obsidian-desktop-widget/actions/workflows/ci.yml)
+
+A floating, transparent desktop graph for your [Obsidian](https://obsidian.md) vault. The widget runs as an Electron app, lives in your system tray, and visualizes your knowledge graph directly on the desktop.
+
+> Fork of [adityagahlot/obsidian-desktop-widget](https://github.com/adityagahlot/obsidian-desktop-widget) with tray support, working autostart, a portable exe, and a bunch of new features.
 
 ## Features
 
+### Graph
 - Full graph view for all notes in your vault
-- Local graph mode for a selected note and its direct neighbors
-- Focus mode for the current note, backlinks, and recently edited notes
-- Transparent, always-on-top desktop window
-- Click-through mode with an interact toggle
-- Live node drag, zoom, and pan
+- Local graph mode for a selected note and its neighbors (configurable link depth)
+- Focus mode with backlinks / outlinks / recent sidebar
+- Live refresh — the graph updates automatically when you edit notes in Obsidian
+- Tag filter (multi-tag chips), folder filter, and orphans-only view
+- Heatmap coloring: color nodes by note age or word count instead of category
 - Hover tooltips with link count, recency, and tags
-- Saves your selected vault path between sessions
+- Note preview panel with basic markdown rendering and clickable wikilinks
+- Export the current graph as PNG
 
-## Project structure
+### Window & desktop integration
+- Transparent, frameless desktop window — optional always-on-top
+- System tray: close/minimize hides to tray, left-click toggles, right-click menu
+- Global hotkey **Ctrl+Shift+G** to show/hide the widget from anywhere
+- Fullscreen mode (⛶ button, Esc to exit)
+- Run on startup (works in dev mode and from the portable exe)
+- Single instance — relaunching just brings the existing window back
 
-This repository is the Electron app folder. These files need to stay together in the same folder:
+### Appearance
+- 9 built-in themes: Default, Nebula, Forest, Amber, Ice, Crimson, Cyber, Mono, Sakura
+- Custom theme with 6 color pickers (accent, nodes, links) — applied live, persisted
+- Panel opacity slider
+- Adjustable label size and node scale
 
-```text
-obsidian-desktop-widget/
-|-- main.js              # Electron main process
-|-- preload.js           # Secure bridge between Electron and the UI
-|-- package.json         # Node/Electron dependencies and scripts
-|-- package-lock.json    # Locked dependency versions
-|-- src/
-|   |-- index.html       # App UI
-|   `-- renderer.js      # Graph rendering and vault parsing logic
-|-- launch.bat           # Windows launcher helper
-|-- launch.vbs           # Windows no-console launcher helper
-`-- create-shortcut.ps1  # Optional Windows shortcut script
-```
+### Updates
+- Built-in update check against GitHub releases (manual button + silent check on launch)
 
-Do not copy only `src/` or only the Electron files somewhere else. Run `npm install` and `npm start` from the folder that contains `package.json`, `main.js`, and `preload.js`.
+## Installation
 
-`node_modules/` is intentionally not included in GitHub. It is recreated locally by running `npm install`.
+### Windows
 
-## Requirements
+From the [latest release](https://github.com/NimrodLeFay/obsidian-desktop-widget/releases/latest):
 
-- [Node.js](https://nodejs.org/) 18 or newer
-- npm, included with Node.js
-- An Obsidian vault folder containing Markdown files
+- **`ObsidianGraphWidget-Setup-x.x.x.exe`** (recommended) — installer; much faster startup, since the portable exe unpacks itself to a temp folder on every launch
+- **`ObsidianGraphWidget.exe`** — portable, no installation; if you enable "Run on startup", keep the exe where it is
 
-## Install and run
+Note: the binaries are unsigned, so Windows SmartScreen may warn on first launch — choose "Run anyway".
 
-Clone the repository:
+### From source
+
+Requirements: [Node.js](https://nodejs.org/) 18+ and npm.
 
 ```bash
-git clone https://github.com/adityagahlot/obsidian-desktop-widget.git
+git clone https://github.com/NimrodLeFay/obsidian-desktop-widget.git
 cd obsidian-desktop-widget
-```
-
-Install dependencies:
-
-```bash
 npm install
-```
-
-Start the Electron app:
-
-```bash
 npm start
 ```
 
 On first launch, choose your Obsidian vault folder when prompted.
 
-## Troubleshooting Electron install on Windows
-
-If `npm install` finishes but `npm start` fails because Electron did not download correctly, you can install the Electron binary manually.
-
-First, check the Electron version used by this project:
-
-```powershell
-Get-Content node_modules\electron\package.json
-```
-
-Look for the `version` field.
-
-Then:
-
-1. Go to [Electron releases](https://github.com/electron/electron/releases).
-2. Find the release that matches the version in `node_modules\electron\package.json`.
-3. Download the Windows x64 zip file named like `electron-vXX.X.X-win32-x64.zip`.
-4. Unzip it.
-5. Place the unzipped contents inside this folder:
-
-```text
-node_modules\electron\dist\
-```
-
-The folder should contain `electron.exe` directly inside `dist`.
-
-Finally, create this file:
-
-```text
-node_modules\electron\path.txt
-```
-
-Put only this text inside it:
-
-```text
-electron.exe
-```
-
-Then run:
-
-```bash
-npm start
-```
-
-## Running from a downloaded ZIP
-
-If you download the project as a ZIP from GitHub:
-
-1. Extract the ZIP.
-2. Open a terminal inside the extracted folder that contains `package.json`.
-3. Run `npm install`.
-4. Run `npm start`.
-
-If you see a nested folder after extracting, open the inner project folder before running the commands.
-
 ## Controls
 
 | Area | Action |
 | --- | --- |
-| Hover window | Shows the control panel and legend |
-| Full / Local / Focus buttons | Switch graph mode |
-| Search box | Find and select a note in Local or Focus mode |
-| Refresh | Re-read the vault from disk |
-| Click-thru / Interact | Toggle mouse interaction |
-| Vault | Change the selected vault folder |
-| Close | Close the app |
-| Drag nodes | Reposition nodes |
-| Scroll | Zoom in or out |
-| Click and drag background | Pan the graph |
+| ⚙ tab (left edge) | Open the control panel |
+| Full / Local / Focus | Switch graph mode |
+| Search box | Find and select a note |
+| Filter section | Tag chips, folder dropdown, orphans-only toggle |
+| Color Nodes By | Category, age heatmap, or word-count heatmap |
+| 📌 | Toggle always-on-top |
+| ⛶ | Fullscreen (Esc to exit) |
+| — / ✕ | Hide to system tray |
+| Tray icon | Left-click: show/hide · right-click: menu |
+| **Ctrl+Shift+G** | Global show/hide hotkey |
+| Drag nodes / scroll / drag background | Reposition, zoom, pan |
 
-## Click-through mode
-
-When click-through mode is active, desktop clicks pass through the widget. Switch to Interact mode when you want to drag nodes, click controls, or move around the graph.
-
-## Color legend
+## Color legend (category mode)
 
 | Color | Meaning |
 | --- | --- |
 | Grey | Regular note |
-| Purple | Selected or center note |
+| Purple | Selected / center note |
 | Blue | Tagged note |
 | Green | Modified in the last 7 days |
 
-## Build optional installers
-
-Package for the current platform:
-
-```bash
-npm run build
-```
-
-Windows installer:
+## Building the exe
 
 ```bash
 npm run build:win
 ```
 
-macOS DMG:
+Output: `dist/ObsidianGraphWidget.exe` (portable). Heads-up: don't redirect build logs into the project folder — a file growing during packaging corrupts the asar archive.
 
-```bash
-npm run build:mac
-```
+## Privacy
 
-Build output is written to `dist/`.
+The widget reads your vault's Markdown files locally (read-only — it never writes to your vault). No internet connection is needed except for the optional update check against the GitHub API.
 
-## How it reads your vault
+## Credits
 
-The widget scans Markdown files recursively and extracts:
-
-- `[[wikilinks]]` for graph edges
-- `#tags` and frontmatter tags for node styling
-- File modified times for recency highlighting
-
-Your vault data stays on your machine. The app does not need an internet connection to read your notes.
+- Original project by [Aditya Gahlot](https://github.com/adityagahlot/obsidian-desktop-widget)
+- Fork maintained by Kolja
+- License: ISC (same as upstream)

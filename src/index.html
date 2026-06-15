@@ -50,6 +50,46 @@
   --panel:rgba(3,10,20,0.93); --border:rgba(125,211,252,0.1);
   --tag-bg:rgba(2,132,199,0.18); --tag-text:#bae6fd;
 }
+[data-theme="crimson"] {
+  --node-default:#a06060; --node-center:#f87171; --node-backlink:#fca5a5;
+  --node-recent:#fbbf24;  --node-tagged:#fb923c;  --node-outlink:#fda4af;
+  --link-base:rgba(248,113,113,0.08); --link-hot:rgba(248,113,113,0.5);
+  --accent:#dc2626; --accent-glow:rgba(220,38,38,0.3);
+  --panel:rgba(18,5,5,0.93); --border:rgba(248,113,113,0.12);
+  --tag-bg:rgba(220,38,38,0.18); --tag-text:#fca5a5;
+  --focus-ring:rgba(220,38,38,0.5);
+}
+[data-theme="cyber"] {
+  --node-default:#4d7a6a; --node-center:#22d3ee; --node-backlink:#67e8f9;
+  --node-recent:#a3e635;  --node-tagged:#4ade80;  --node-outlink:#2dd4bf;
+  --link-base:rgba(34,211,238,0.09); --link-hot:rgba(74,222,128,0.55);
+  --accent:#06b6d4; --accent-glow:rgba(6,182,212,0.35);
+  --panel:rgba(2,12,12,0.93); --border:rgba(34,211,238,0.14);
+  --tag-bg:rgba(6,182,212,0.18); --tag-text:#67e8f9;
+  --focus-ring:rgba(6,182,212,0.5);
+}
+[data-theme="mono"] {
+  --node-default:#737373; --node-center:#fafafa; --node-backlink:#d4d4d4;
+  --node-recent:#a3a3a3;  --node-tagged:#e5e5e5;  --node-outlink:#bfbfbf;
+  --link-base:rgba(255,255,255,0.08); --link-hot:rgba(255,255,255,0.5);
+  --accent:#a3a3a3; --accent-glow:rgba(163,163,163,0.25);
+  --panel:rgba(10,10,10,0.93); --border:rgba(255,255,255,0.12);
+  --tag-bg:rgba(255,255,255,0.12); --tag-text:#e5e5e5;
+  --focus-ring:rgba(212,212,212,0.5);
+}
+[data-theme="sakura"] {
+  --node-default:#9a7a85; --node-center:#fda4af; --node-backlink:#fecdd3;
+  --node-recent:#c4b5fd;  --node-tagged:#fdba74;  --node-outlink:#f9a8d4;
+  --link-base:rgba(253,164,175,0.09); --link-hot:rgba(253,164,175,0.5);
+  --accent:#fb7185; --accent-glow:rgba(251,113,133,0.3);
+  --panel:rgba(20,8,12,0.93); --border:rgba(253,164,175,0.12);
+  --tag-bg:rgba(251,113,133,0.18); --tag-text:#fecdd3;
+  --focus-ring:rgba(251,113,133,0.5);
+}
+[data-theme="nebula"]  { --focus-ring:rgba(219,39,119,0.5); }
+[data-theme="forest"]  { --focus-ring:rgba(22,163,74,0.5); }
+[data-theme="amber"]   { --focus-ring:rgba(217,119,6,0.5); }
+[data-theme="ice"]     { --focus-ring:rgba(2,132,199,0.5); }
 
 html, body {
   width:100%; height:100%; background:transparent; overflow:hidden;
@@ -125,11 +165,7 @@ svg#graph { width:100%; height:100%; position:absolute; inset:0; background:tran
   text-align:left; display:flex; align-items:center; gap:7px; transition:all 0.13s;
 }
 .mode-btn:hover { background:var(--hover); color:var(--text); border-color:var(--border); }
-.mode-btn.active { background:rgba(124,58,237,0.15); border-color:var(--focus-ring); color:#c4b5fd; font-weight:600; }
-[data-theme="nebula"]  .mode-btn.active { color:#f9a8d4; border-color:rgba(219,39,119,0.5); background:rgba(219,39,119,0.12); }
-[data-theme="forest"]  .mode-btn.active { color:#86efac; border-color:rgba(22,163,74,0.5);  background:rgba(22,163,74,0.12); }
-[data-theme="amber"]   .mode-btn.active { color:#fde68a; border-color:rgba(217,119,6,0.5);  background:rgba(217,119,6,0.12); }
-[data-theme="ice"]     .mode-btn.active { color:#bae6fd; border-color:rgba(2,132,199,0.5);  background:rgba(2,132,199,0.12); }
+.mode-btn.active { background:var(--tag-bg); border-color:var(--focus-ring); color:var(--tag-text); font-weight:600; }
 
 /* Search */
 .search-wrap { position:relative; }
@@ -173,6 +209,49 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
 }
 .theme-dot.active { border-color:rgba(255,255,255,0.8); transform:scale(1.18); box-shadow:0 0 10px rgba(255,255,255,0.2); }
 .theme-dot:hover:not(.active) { transform:scale(1.08); }
+
+/* Custom colors */
+#custom-colors { display:none; flex-direction:column; gap:5px; margin-top:8px; }
+#custom-colors.show { display:flex; }
+.color-row { display:flex; align-items:center; justify-content:space-between; }
+.color-label { font-size:11px; color:var(--text-dim); }
+input[type=color] {
+  width:36px; height:20px; border:1px solid var(--border); border-radius:4px;
+  background:transparent; cursor:pointer; padding:0;
+}
+input[type=color]::-webkit-color-swatch-wrapper { padding:1px; }
+input[type=color]::-webkit-color-swatch { border:none; border-radius:3px; }
+
+/* Selects */
+select.panel-select {
+  width:100%; padding:6px 9px; border-radius:5px;
+  background:rgba(255,255,255,0.06); border:1px solid var(--border);
+  color:var(--text); font-size:12px; outline:none; cursor:pointer;
+  appearance:none;
+}
+select.panel-select:focus { border-color:var(--focus-ring); }
+select.panel-select option { background:#16161e; color:#ddd; }
+
+/* Tag filter chips */
+#active-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
+.tag-chip {
+  display:inline-flex; align-items:center; gap:4px;
+  font-size:10px; padding:2px 7px; border-radius:10px;
+  background:var(--tag-bg); color:var(--tag-text); cursor:default;
+}
+.tag-chip span { cursor:pointer; opacity:0.7; font-size:11px; }
+.tag-chip span:hover { opacity:1; }
+#tag-suggestions {
+  position:absolute; top:calc(100% + 4px); left:0; right:0;
+  background:var(--panel); border:1px solid var(--border); border-radius:6px;
+  max-height:140px; overflow-y:auto; z-index:400; backdrop-filter:blur(18px);
+}
+#tag-suggestions:empty { display:none; }
+
+/* Heatmap legend */
+#heatmap-legend { display:none; align-items:center; gap:7px; font-size:10px; color:var(--text-dim); }
+#heatmap-legend.show { display:flex; }
+#heatmap-gradient { width:70px; height:8px; border-radius:4px; }
 
 /* Toggles */
 .toggle-row { display:flex; align-items:center; justify-content:space-between; padding:3px 0; }
@@ -395,6 +474,14 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
   white-space:nowrap; backdrop-filter:blur(12px);
 }
 #brief-msg.show { opacity:1; }
+#parse-progress {
+  position:absolute; top:14px; left:50%; transform:translateX(-50%);
+  background:rgba(30,20,50,0.96); border:1px solid var(--border);
+  border-radius:6px; padding:6px 16px; font-size:11px; color:var(--text);
+  z-index:600; pointer-events:none; opacity:0; transition:opacity 0.2s;
+  white-space:nowrap; backdrop-filter:blur(12px);
+}
+#parse-progress.show { opacity:1; }
 </style>
 </head>
 <body>
@@ -467,6 +554,36 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
       </div>
     </div>
 
+    <div id="filter-section">
+      <div class="section-label">Filter</div>
+      <div class="search-wrap">
+        <input class="search-input" id="tag-filter-input" placeholder="Filter by tag…" autocomplete="off">
+        <div id="tag-suggestions"></div>
+      </div>
+      <div id="active-tags"></div>
+      <select class="panel-select" id="folder-filter" style="margin-top:6px">
+        <option value="">All folders</option>
+      </select>
+      <div class="toggle-row" style="margin-top:4px">
+        <span class="toggle-label">Orphans only</span>
+        <button class="toggle" id="toggle-orphans"></button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Color Nodes By</div>
+      <select class="panel-select" id="colorby-select">
+        <option value="theme">Category (theme)</option>
+        <option value="age">Age — heatmap</option>
+        <option value="length">Word count — heatmap</option>
+      </select>
+      <div id="heatmap-legend" style="margin-top:6px">
+        <span id="hm-left">new</span>
+        <div id="heatmap-gradient"></div>
+        <span id="hm-right">old</span>
+      </div>
+    </div>
+
     <div>
       <div class="section-label">Label Size</div>
       <div class="slider-row">
@@ -486,6 +603,15 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
     </div>
 
     <div>
+      <div class="section-label">Panel Opacity</div>
+      <div class="slider-row">
+        <span class="slider-label">Alpha</span>
+        <input type="range" id="opacity-slider" min="50" max="100" step="1" value="93">
+        <span class="slider-val" id="opacity-val">93%</span>
+      </div>
+    </div>
+
+    <div>
       <div class="section-label">Theme</div>
       <div class="theme-grid">
         <div class="theme-dot active" data-theme="default" style="background:linear-gradient(135deg,#7c3aed,#7dd3fc)" title="Default"></div>
@@ -493,6 +619,20 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
         <div class="theme-dot" data-theme="forest"  style="background:linear-gradient(135deg,#16a34a,#67e8f9)" title="Forest"></div>
         <div class="theme-dot" data-theme="amber"   style="background:linear-gradient(135deg,#d97706,#fb923c)" title="Amber"></div>
         <div class="theme-dot" data-theme="ice"     style="background:linear-gradient(135deg,#0284c7,#f0abfc)" title="Ice"></div>
+        <div class="theme-dot" data-theme="crimson" style="background:linear-gradient(135deg,#dc2626,#fbbf24)" title="Crimson"></div>
+        <div class="theme-dot" data-theme="cyber"   style="background:linear-gradient(135deg,#06b6d4,#4ade80)" title="Cyber"></div>
+        <div class="theme-dot" data-theme="mono"    style="background:linear-gradient(135deg,#404040,#e5e5e5)" title="Mono"></div>
+        <div class="theme-dot" data-theme="sakura"  style="background:linear-gradient(135deg,#fb7185,#fecdd3)" title="Sakura"></div>
+        <div class="theme-dot" data-theme="custom"  style="background:conic-gradient(#f87171,#fbbf24,#4ade80,#22d3ee,#a78bfa,#f87171)" title="Custom"></div>
+      </div>
+      <div id="custom-colors">
+        <div class="color-row"><span class="color-label">Accent</span><input type="color" id="cc-accent" value="#7c3aed"></div>
+        <div class="color-row"><span class="color-label">Note</span><input type="color" id="cc-default" value="#7c7c7c"></div>
+        <div class="color-row"><span class="color-label">Selected</span><input type="color" id="cc-center" value="#a78bfa"></div>
+        <div class="color-row"><span class="color-label">Tagged</span><input type="color" id="cc-tagged" value="#7dd3fc"></div>
+        <div class="color-row"><span class="color-label">Recent</span><input type="color" id="cc-recent" value="#34d399"></div>
+        <div class="color-row"><span class="color-label">Links</span><input type="color" id="cc-link" value="#a78bfa"></div>
+        <button class="act-btn" id="cc-reset" style="margin-top:3px">↺ Reset colors</button>
       </div>
     </div>
 
@@ -510,12 +650,18 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
         <span class="toggle-label">Run on startup</span>
         <button class="toggle" id="toggle-startup"></button>
       </div>
+      <div class="toggle-row">
+        <span class="toggle-label">Hotkey</span>
+        <button class="act-btn" id="hotkey-btn" style="width:auto;padding:4px 10px;font-size:10px" title="Click, then press the new key combination">Ctrl+Shift+G</button>
+      </div>
     </div>
 
     <div>
       <div class="section-label">Actions</div>
       <div style="display:flex;flex-direction:column;gap:4px;">
         <button class="act-btn" id="refresh-btn">↺ Refresh vault</button>
+        <button class="act-btn" id="export-btn">📷 Export as PNG</button>
+        <button class="act-btn" id="update-btn">⬆ Check for updates</button>
         <button class="act-btn danger" id="vault-btn">⌂ Change vault</button>
       </div>
     </div>
@@ -541,8 +687,9 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
 <!-- ── Corner controls (top right) ───────────────────────────────── -->
 <div id="corner-controls">
   <div class="icon-btn" id="pin-btn" title="Always on top" style="opacity:0.45">📌</div>
-  <div class="icon-btn" id="minimize-btn" title="Minimize">—</div>
-  <div class="icon-btn danger" id="close-btn" title="Close">✕</div>
+  <div class="icon-btn" id="fullscreen-btn" title="Fullscreen (Esc to exit)">⛶</div>
+  <div class="icon-btn" id="minimize-btn" title="Minimize to tray">—</div>
+  <div class="icon-btn danger" id="close-btn" title="Hide to tray">✕</div>
 </div>
 
 <!-- ── Tooltip ───────────────────────────────────────────────────── -->
@@ -586,6 +733,9 @@ input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.25); }
 
 <!-- ── Brief status toast ────────────────────────────────────────── -->
 <div id="brief-msg"></div>
+
+<!-- ── Parse progress (large vaults) ─────────────────────────────── -->
+<div id="parse-progress"></div>
 
 <script src="../node_modules/d3/dist/d3.min.js"></script>
 <script src="renderer.js"></script>

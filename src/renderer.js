@@ -20,11 +20,28 @@ let tooltipNodeId = null;
 let currentTheme  = 'default';
 let transform     = d3.zoomIdentity;
 let searchResultIdx = -1;
+let activeTags    = [];
+let folderFilter  = '';
+let orphansOnly   = false;
+let colorBy       = 'theme';   // 'theme' | 'age' | 'length'
+let panelOpacity  = 0.93;
 
 // keep references to live d3 selections for label updates
 let _labelSel = null;
 let _linksCopy = [];
 let _nodesCopy = [];
+let _degreeFull = new Map();  // node id → degree across the whole vault
+let _degreeView = new Map();  // node id → degree in the current view
+
+function computeDegrees(links) {
+  const m = new Map();
+  for (const l of links) {
+    const s = lid(l.source), t = lid(l.target);
+    m.set(s, (m.get(s) || 0) + 1);
+    m.set(t, (m.get(t) || 0) + 1);
+  }
+  return m;
+}
 
 // ── Elements ─────────────────────────────────────────────────────
 const svg           = d3.select('#graph');
@@ -48,11 +65,16 @@ const statsEl       = document.getElementById('stats');
 const fileSearch    = document.getElementById('file-search');
 const searchResults = document.getElementById('search-results');
 const briefMsg      = document.getElementById('brief-msg');
+const parseProg     = document.getElementById('parse-progress');
 
 // ── Init ─────────────────────────────────────────────────────────
 async function init() {
   const prefs = await api.loadPrefs();
 
+  if (prefs.customColors) {
+    customColors = { ...CC_DEFAULTS, ...prefs.customColors };
+    syncColorInputs();
+  }
   if (prefs.theme)    applyTheme(prefs.theme, false);
   if (prefs.mode)     { currentMode = prefs.mode; }
   if (prefs.fontSize) {
@@ -74,6 +96,17 @@ async function init() {
     document.getElementById('depth-slider').value = linkDepth;
     document.getElementById('depth-val').textContent = linkDepth;
   }
+  if (prefs.colorBy) {
+    colorBy = prefs.colorBy;
+    document.getElementById('colorby-select').value = colorBy;
+    updateHeatmapLegend();
+  }
+  if (prefs.panelOpacity !== undefined) {
+    panelOpacity = prefs.panelOpacity;
+    document.getElementById('opacity-slider').value = Math.round(panelOpacity * 100);
+    document.getElementById('opacity-val').textContent = Math.round(panelOpacity * 100) + '%';
+  }
+  applyPanelOpacity();
 
   setActiveMode(currentMode);
 
@@ -87,8 +120,17 @@ async function init() {
   const vaultPath = await api.getVaultPath();
   if (vaultPath) {
     await loadAndDraw();
+    populateFolderFilter();
     setupScreen.classList.add('hidden');
   }
+
+  // Show configured hotkey
+  api.getHotkey().then(a => { document.getElementById('hotkey-btn').textContent = prettyAccel(a); }).catch(() => {});
+
+  // Silent update check on launch
+  api.checkUpdate().then(upd => {
+    if (upd?.newer) toast(`Update available: v${upd.latest} — see "Check for updates" in the panel`);
+  }).catch(() => {});
 }
 
 function setActiveMode(mode) {
@@ -135,21 +177,51 @@ function bfsDepth(targetId, sourceId) {
   return 99;
 }
 
+// ── Filters (tags / folder / orphans) ─────────────────────────────
+function filteredGraph() {
+  if (!graphData) return { nodes: [], links: [] };
+  let nodes = graphData.nodes;
+
+  if (folderFilter) {
+    nodes = nodes.filter(n => n.id.startsWith(folderFilter + '/'));
+  }
+  if (activeTags.length) {
+    nodes = nodes.filter(n =>
+      activeTags.every(t => (n.tags || []).some(x => x === t || x.startsWith(t + '/')))
+    );
+  }
+  if (orphansOnly) {
+    // orphan = no links anywhere in the vault
+    const linked = new Set();
+    graphData.links.forEach(l => { linked.add(lid(l.source)); linked.add(lid(l.target)); });
+    nodes = nodes.filter(n => !linked.has(n.id));
+  }
+
+  const ids = new Set(nodes.map(n => n.id));
+  const links = graphData.links.filter(l => ids.has(lid(l.source)) && ids.has(lid(l.target)));
+  return { nodes, links };
+}
+
+function filtersActive() {
+  return !!(activeTags.length || folderFilter || orphansOnly);
+}
+
 // ── Data filter ───────────────────────────────────────────────────
 function getDisplayData() {
   if (!graphData) return { nodes: [], links: [] };
   const now = Date.now(), week = 7 * 24 * 60 * 60 * 1000;
+  const G = filteredGraph();
 
   if (currentMode === 'global') {
     return {
-      nodes: graphData.nodes.map(n => ({ ...n, _recent: n.mtime > now - week, _role: 'normal' })),
-      links: graphData.links
+      nodes: G.nodes.map(n => ({ ...n, _recent: n.mtime > now - week, _role: 'normal' })),
+      links: G.links
     };
   }
 
   if (!selectedNode) {
     // No note selected — show recent notes as a hint
-    const recent = graphData.nodes
+    const recent = G.nodes
       .filter(n => n.mtime > now - week)
       .sort((a, b) => b.mtime - a.mtime)
       .slice(0, 25)
@@ -163,41 +235,41 @@ function getDisplayData() {
     let frontier = new Set([selectedNode.id]);
     for (let d = 0; d < linkDepth; d++) {
       const next = new Set();
-      graphData.links.forEach(l => {
+      G.links.forEach(l => {
         const s = lid(l.source), t = lid(l.target);
         if (frontier.has(s) && !included.has(t)) { included.add(t); next.add(t); }
         if (frontier.has(t) && !included.has(s)) { included.add(s); next.add(s); }
       });
       frontier = next;
     }
-    const nodesCopy = graphData.nodes.filter(n => included.has(n.id)).map(n => ({
+    const nodesCopy = G.nodes.filter(n => included.has(n.id)).map(n => ({
       ...n,
       _role: n.id === selectedNode.id ? 'center' : 'neighbor',
       _recent: n.mtime > now - week,
       _depth: bfsDepth(n.id, selectedNode.id)
     }));
-    const linksCopy = graphData.links.filter(l => included.has(lid(l.source)) && included.has(lid(l.target)));
+    const linksCopy = G.links.filter(l => included.has(lid(l.source)) && included.has(lid(l.target)));
     return { nodes: nodesCopy, links: linksCopy };
   }
 
   if (currentMode === 'focus') {
     const included = new Set([selectedNode.id]);
     const backlinkIds = new Set(), outlinkIds = new Set();
-    graphData.links.forEach(l => {
+    G.links.forEach(l => {
       const s = lid(l.source), t = lid(l.target);
       if (t === selectedNode.id) { included.add(s); backlinkIds.add(s); }
       if (s === selectedNode.id) { included.add(t); outlinkIds.add(t); }
     });
-    graphData.nodes.filter(n => n.mtime > now - week).forEach(n => included.add(n.id));
+    G.nodes.filter(n => n.mtime > now - week).forEach(n => included.add(n.id));
 
-    const nodesCopy = graphData.nodes.filter(n => included.has(n.id)).map(n => {
+    const nodesCopy = G.nodes.filter(n => included.has(n.id)).map(n => {
       let role = 'recent';
       if (n.id === selectedNode.id)  role = 'center';
       else if (backlinkIds.has(n.id)) role = 'backlink';
       else if (outlinkIds.has(n.id))  role = 'outlink';
       return { ...n, _role: role, _recent: n.mtime > now - week };
     });
-    const filteredLinks = graphData.links.filter(l => included.has(lid(l.source)) && included.has(lid(l.target)));
+    const filteredLinks = G.links.filter(l => included.has(lid(l.source)) && included.has(lid(l.target)));
     return { nodes: nodesCopy, links: filteredLinks };
   }
 
@@ -206,6 +278,16 @@ function getDisplayData() {
 
 // ── Node styling ──────────────────────────────────────────────────
 function nodeColor(d) {
+  // Heatmap modes override category colors (center stays highlighted)
+  if (colorBy === 'age' && d._role !== 'center') {
+    const days = (Date.now() - d.mtime) / 86400000;
+    const t = Math.min(1, Math.sqrt(days / 180)); // 0 = today … 1 = ≥6 months
+    return d3.interpolateRgb(cssVar('--node-recent'), cssVar('--node-default'))(t);
+  }
+  if (colorBy === 'length' && d._role !== 'center') {
+    const t = Math.min(1, Math.sqrt((d.wordCount || 0) / 2000)); // 1 = ≥2000 words
+    return d3.interpolateRgb(cssVar('--node-default'), cssVar('--node-center'))(t);
+  }
   if (d._role === 'center')   return cssVar('--node-center');
   if (d._role === 'backlink') return cssVar('--node-backlink');
   if (d._role === 'outlink')  return cssVar('--node-outlink');
@@ -216,7 +298,7 @@ function nodeColor(d) {
 
 function nodeRadius(d) {
   const base = d._role === 'center' ? 9 : 3.5;
-  const degree = (graphData?.links || []).filter(l => lid(l.source) === d.id || lid(l.target) === d.id).length;
+  const degree = _degreeFull.get(d.id) || 0;
   return Math.max(base, Math.min(13, base + degree * 0.55)) * nodeScale;
 }
 
@@ -224,6 +306,7 @@ function nodeRadius(d) {
 function draw() {
   if (simulation) simulation.stop();
 
+  _degreeFull = computeDegrees(graphData?.links || []);
   const { nodes, links } = getDisplayData();
 
   // Dedup links
@@ -237,6 +320,7 @@ function draw() {
   const linksCopy = dedupLinks.map(l => ({ source: lid(l.source), target: lid(l.target) }));
   _nodesCopy = nodesCopy;
   _linksCopy = linksCopy;
+  _degreeView = computeDegrees(linksCopy);
 
   const w = window.innerWidth, h = window.innerHeight;
   const isLocal = currentMode !== 'global';
@@ -387,18 +471,16 @@ function resolveLabels(labelSel, nodesCopy, linksCopy) {
   const placed = [];
   const visible = new Set();
 
-  // Priority order: center > high-degree > others
+  // Priority order: center > high-degree > others (O(1) degree lookups)
   const sorted = [...nodesCopy].filter(d => d.x != null).sort((a, b) => {
     if (a._role === 'center') return -1;
     if (b._role === 'center') return 1;
-    const da = linksCopy.filter(l => lid(l.source) === a.id || lid(l.target) === a.id).length;
-    const db = linksCopy.filter(l => lid(l.source) === b.id || lid(l.target) === b.id).length;
-    return db - da;
+    return (_degreeView.get(b.id) || 0) - (_degreeView.get(a.id) || 0);
   });
 
   for (const d of sorted) {
     // Decide if this node wants a label at current zoom
-    const deg = linksCopy.filter(l => lid(l.source) === d.id || lid(l.target) === d.id).length;
+    const deg = _degreeView.get(d.id) || 0;
     const wants = d._role === 'center'
       || currentMode !== 'global'
       || sc > 1.4
@@ -448,7 +530,7 @@ function showTooltip(event, d) {
   tooltipNodeId = d.id;
   const now = Date.now();
   const daysAgo = Math.floor((now - d.mtime) / 86400000);
-  const lc = _linksCopy.filter(l => lid(l.source) === d.id || lid(l.target) === d.id).length;
+  const lc = _degreeView.get(d.id) || 0;
 
   ttName.textContent = d.name;
   ttMeta.innerHTML = [
@@ -765,17 +847,92 @@ document.getElementById('node-slider').addEventListener('input', e => {
 });
 
 // ── Themes ────────────────────────────────────────────────────────
+const CC_DEFAULTS = {
+  accent: '#7c3aed', default: '#7c7c7c', center: '#a78bfa',
+  tagged: '#7dd3fc', recent: '#34d399', link: '#a78bfa'
+};
+let customColors = { ...CC_DEFAULTS };
+
+// CSS vars driven by the custom pickers (others fall back to :root defaults)
+const CC_VARS = [
+  ['--accent',        c => c.accent],
+  ['--accent-glow',   c => hexToRgba(c.accent, 0.3)],
+  ['--focus-ring',    c => hexToRgba(c.accent, 0.5)],
+  ['--tag-bg',        c => hexToRgba(c.accent, 0.18)],
+  ['--tag-text',      c => c.center],
+  ['--node-default',  c => c.default],
+  ['--node-center',   c => c.center],
+  ['--node-backlink', c => c.center],
+  ['--node-tagged',   c => c.tagged],
+  ['--node-outlink',  c => c.tagged],
+  ['--node-recent',   c => c.recent],
+  ['--link-hot',      c => hexToRgba(c.link, 0.55)],
+  ['--link-base',     c => hexToRgba(c.link, 0.1)],
+];
+
+function hexToRgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function applyCustomColors() {
+  const root = document.documentElement;
+  CC_VARS.forEach(([v, fn]) => root.style.setProperty(v, fn(customColors)));
+}
+
+function clearCustomColors() {
+  const root = document.documentElement;
+  CC_VARS.forEach(([v]) => root.style.removeProperty(v));
+}
+
+function syncColorInputs() {
+  for (const key of Object.keys(CC_DEFAULTS)) {
+    const el = document.getElementById('cc-' + key);
+    if (el) el.value = customColors[key];
+  }
+}
+
 document.querySelectorAll('.theme-dot').forEach(dot =>
   dot.addEventListener('click', () => applyTheme(dot.dataset.theme))
 );
 
 function applyTheme(name, save = true) {
   currentTheme = name;
-  document.documentElement.dataset.theme = name === 'default' ? '' : name;
+  if (name === 'custom') {
+    document.documentElement.dataset.theme = '';
+    applyCustomColors();
+  } else {
+    clearCustomColors();
+    document.documentElement.dataset.theme = name === 'default' ? '' : name;
+  }
   document.querySelectorAll('.theme-dot').forEach(d => d.classList.toggle('active', d.dataset.theme === name));
+  document.getElementById('custom-colors').classList.toggle('show', name === 'custom');
+  applyPanelOpacity();
+  updateHeatmapLegend();
   if (graphData) draw();
   if (save) savePrefs();
 }
+
+// Color picker wiring: edit → apply live + switch to custom theme
+for (const key of Object.keys(CC_DEFAULTS)) {
+  const el = document.getElementById('cc-' + key);
+  if (!el) continue;
+  el.addEventListener('input', () => {
+    customColors[key] = el.value;
+    if (currentTheme !== 'custom') applyTheme('custom', false);
+    else applyCustomColors();
+    if (graphData) draw();
+  });
+  el.addEventListener('change', () => savePrefs());
+}
+
+document.getElementById('cc-reset').addEventListener('click', () => {
+  customColors = { ...CC_DEFAULTS };
+  syncColorInputs();
+  applyCustomColors();
+  if (graphData) draw();
+  savePrefs();
+});
 
 // ── Toggles ───────────────────────────────────────────────────────
 function syncToggle(id, state) {
@@ -812,6 +969,31 @@ document.getElementById('toggle-startup').addEventListener('click', async functi
 document.getElementById('close-btn').addEventListener('click', () => api.closeApp());
 document.getElementById('minimize-btn').addEventListener('click', () => api.minimizeApp());
 
+// ── Fullscreen ────────────────────────────────────────────────────
+let isFullscreen = false;
+
+function updateFullscreenBtn() {
+  const btn = document.getElementById('fullscreen-btn');
+  btn.classList.toggle('on', isFullscreen);
+  btn.title = isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen (Esc to exit)';
+}
+
+document.getElementById('fullscreen-btn').addEventListener('click', async () => {
+  isFullscreen = await api.toggleFullscreen();
+  updateFullscreenBtn();
+});
+
+// Stay in sync if fullscreen changes from elsewhere
+api.onFullscreenChange(v => { isFullscreen = v; updateFullscreenBtn(); });
+
+// Esc exits fullscreen (unless a hotkey is being recorded)
+document.addEventListener('keydown', async e => {
+  if (e.key === 'Escape' && isFullscreen && !recordingHotkey) {
+    isFullscreen = await api.toggleFullscreen();
+    updateFullscreenBtn();
+  }
+});
+
 document.getElementById('pin-btn').addEventListener('click', async () => {
   isAlwaysOnTop = !isAlwaysOnTop;
   await api.toggleAlwaysOnTop(isAlwaysOnTop);
@@ -827,7 +1009,251 @@ function updatePinBtn() {
   btn.style.filter  = isAlwaysOnTop ? 'none' : 'grayscale(0.6)';
 }
 
-document.getElementById('refresh-btn').addEventListener('click', () => loadAndDraw());
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  await loadAndDraw();
+  populateFolderFilter();
+});
+
+// ── Tag / folder / orphan filters ─────────────────────────────────
+const tagInput = document.getElementById('tag-filter-input');
+const tagSuggestions = document.getElementById('tag-suggestions');
+const activeTagsEl = document.getElementById('active-tags');
+
+function allVaultTags() {
+  const s = new Set();
+  (graphData?.nodes || []).forEach(n => (n.tags || []).forEach(t => s.add(t)));
+  return [...s].sort();
+}
+
+function renderTagChips() {
+  activeTagsEl.innerHTML = activeTags.map(t =>
+    `<div class="tag-chip">#${escapeHtml(t)}<span data-tag="${escapeHtml(t)}">✕</span></div>`
+  ).join('');
+  activeTagsEl.querySelectorAll('.tag-chip span').forEach(x =>
+    x.addEventListener('click', () => {
+      activeTags = activeTags.filter(t => t !== x.dataset.tag);
+      renderTagChips(); draw();
+    })
+  );
+}
+
+tagInput.addEventListener('input', () => {
+  const q = tagInput.value.toLowerCase().replace(/^#/, '').trim();
+  if (!q) { tagSuggestions.innerHTML = ''; return; }
+  const matches = allVaultTags()
+    .filter(t => t.toLowerCase().includes(q) && !activeTags.includes(t))
+    .slice(0, 10);
+  tagSuggestions.innerHTML = matches.map(t =>
+    `<div class="sr-item" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</div>`
+  ).join('');
+  tagSuggestions.querySelectorAll('.sr-item').forEach(el =>
+    el.addEventListener('click', () => {
+      activeTags.push(el.dataset.tag);
+      tagInput.value = ''; tagSuggestions.innerHTML = '';
+      renderTagChips(); draw();
+    })
+  );
+});
+
+tagInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const first = tagSuggestions.querySelector('.sr-item');
+    if (first) { first.dispatchEvent(new Event('click')); }
+  } else if (e.key === 'Escape') tagSuggestions.innerHTML = '';
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#filter-section')) tagSuggestions.innerHTML = '';
+});
+
+function populateFolderFilter() {
+  const sel = document.getElementById('folder-filter');
+  const folders = new Set();
+  (graphData?.nodes || []).forEach(n => {
+    const idx = n.id.indexOf('/');
+    if (idx > 0) folders.add(n.id.slice(0, idx));
+  });
+  const current = folderFilter;
+  sel.innerHTML = '<option value="">All folders</option>' +
+    [...folders].sort().map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}/</option>`).join('');
+  sel.value = [...folders].includes(current) ? current : '';
+}
+
+document.getElementById('folder-filter').addEventListener('change', e => {
+  folderFilter = e.target.value;
+  draw();
+});
+
+document.getElementById('toggle-orphans').addEventListener('click', function() {
+  orphansOnly = !this.classList.contains('on');
+  this.classList.toggle('on', orphansOnly);
+  draw();
+  if (orphansOnly) toast('Showing notes without any links');
+});
+
+// ── Color-by (heatmap) ────────────────────────────────────────────
+function updateHeatmapLegend() {
+  const leg = document.getElementById('heatmap-legend');
+  const grad = document.getElementById('heatmap-gradient');
+  leg.classList.toggle('show', colorBy !== 'theme');
+  if (colorBy === 'age') {
+    grad.style.background = `linear-gradient(90deg, ${cssVar('--node-recent')}, ${cssVar('--node-default')})`;
+    document.getElementById('hm-left').textContent = 'new';
+    document.getElementById('hm-right').textContent = 'old';
+  } else if (colorBy === 'length') {
+    grad.style.background = `linear-gradient(90deg, ${cssVar('--node-default')}, ${cssVar('--node-center')})`;
+    document.getElementById('hm-left').textContent = 'short';
+    document.getElementById('hm-right').textContent = 'long';
+  }
+}
+
+document.getElementById('colorby-select').addEventListener('change', e => {
+  colorBy = e.target.value;
+  updateHeatmapLegend();
+  draw();
+  savePrefs();
+});
+
+// ── Panel opacity ─────────────────────────────────────────────────
+function applyPanelOpacity() {
+  const root = document.documentElement;
+  root.style.removeProperty('--panel');
+  const base = getComputedStyle(root).getPropertyValue('--panel').trim();
+  const m = base.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if (m) root.style.setProperty('--panel', `rgba(${m[1]},${m[2]},${m[3]},${panelOpacity})`);
+}
+
+document.getElementById('opacity-slider').addEventListener('input', e => {
+  panelOpacity = parseInt(e.target.value) / 100;
+  document.getElementById('opacity-val').textContent = e.target.value + '%';
+  applyPanelOpacity();
+  savePrefs();
+});
+
+// ── PNG export ────────────────────────────────────────────────────
+document.getElementById('export-btn').addEventListener('click', async () => {
+  if (!graphData) { toast('Nothing to export yet'); return; }
+  try {
+    const svgEl = document.getElementById('graph');
+    const clone = svgEl.cloneNode(true);
+
+    // Resolve CSS variables into concrete attributes
+    const orig = svgEl.querySelectorAll('circle, line, text');
+    const copy = clone.querySelectorAll('circle, line, text');
+    orig.forEach((el, i) => {
+      const cs = getComputedStyle(el);
+      const c = copy[i];
+      c.setAttribute('fill', cs.fill);
+      c.setAttribute('stroke', cs.stroke);
+      c.setAttribute('stroke-width', cs.strokeWidth);
+      c.setAttribute('opacity', cs.opacity);
+      if (el.tagName === 'text') {
+        c.setAttribute('font-size', cs.fontSize);
+        c.setAttribute('font-family', 'Segoe UI, sans-serif');
+        if (cs.display === 'none') c.remove();
+      }
+    });
+
+    const w = svgEl.clientWidth, h = svgEl.clientHeight;
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    clone.setAttribute('width', w * 2);
+    clone.setAttribute('height', h * 2);
+
+    const ser = new XMLSerializer().serializeToString(clone);
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = res; img.onerror = rej;
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(ser)));
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w * 2; canvas.height = h * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0d0d12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const ok = await api.exportPng(canvas.toDataURL('image/png'));
+    if (ok) toast('Graph exported as PNG');
+  } catch (e) {
+    toast('Export failed: ' + e.message);
+  }
+});
+
+// ── Update check ──────────────────────────────────────────────────
+document.getElementById('update-btn').addEventListener('click', async () => {
+  toast('Checking for updates…');
+  const upd = await api.checkUpdate();
+  if (!upd) { toast('Could not reach GitHub (offline? repo not set?)'); return; }
+  if (upd.newer) {
+    toast(`Update available: v${upd.latest} (current v${upd.current}) — opening release page`);
+    api.openUrl(upd.url);
+  } else {
+    toast(`Up to date (v${upd.current})`);
+  }
+});
+
+// ── Parse progress (only shown for large vaults to avoid flashing) ─
+api.onParseProgress(({ done, total }) => {
+  if (!total || total < 150 || done >= total) {
+    parseProg.classList.remove('show');
+    return;
+  }
+  parseProg.textContent = `Parsing vault… ${done} / ${total}`;
+  parseProg.classList.add('show');
+});
+
+// ── Live refresh on vault changes ─────────────────────────────────
+api.onVaultChanged(async () => {
+  await loadAndDraw();
+  populateFolderFilter();
+  toast('Vault changed — graph refreshed');
+});
+
+// ── Hotkey remap ──────────────────────────────────────────────────
+const hotkeyBtn = document.getElementById('hotkey-btn');
+let recordingHotkey = false;
+
+function prettyAccel(a) { return (a || '').replace('Control', 'Ctrl').replace('CommandOrControl', 'Ctrl'); }
+
+hotkeyBtn.addEventListener('click', () => {
+  if (recordingHotkey) return;
+  recordingHotkey = true;
+  hotkeyBtn.textContent = 'Press keys… (Esc cancels)';
+});
+
+const KEY_MAP = { ' ': 'Space', 'ArrowUp': 'Up', 'ArrowDown': 'Down', 'ArrowLeft': 'Left', 'ArrowRight': 'Right' };
+const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
+
+document.addEventListener('keydown', async e => {
+  if (!recordingHotkey) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (e.key === 'Escape') {
+    recordingHotkey = false;
+    hotkeyBtn.textContent = prettyAccel(await api.getHotkey());
+    return;
+  }
+  if (MODIFIER_KEYS.has(e.key)) return; // wait for the actual key
+
+  const mods = [];
+  if (e.ctrlKey) mods.push('Control');
+  if (e.altKey) mods.push('Alt');
+  if (e.shiftKey) mods.push('Shift');
+  if (e.metaKey) mods.push('Super');
+  if (!mods.length) { toast('Hotkey needs at least one modifier (Ctrl/Alt/Shift)'); return; }
+
+  let key = KEY_MAP[e.key] || e.key;
+  if (key.length === 1) key = key.toUpperCase();
+
+  const accel = [...mods, key].join('+');
+  const ok = await api.setHotkey(accel);
+  recordingHotkey = false;
+  hotkeyBtn.textContent = prettyAccel(ok ? accel : await api.getHotkey());
+  toast(ok ? `Hotkey set: ${prettyAccel(accel)}` : 'Could not register that combination (in use by another app?)');
+}, true);
 
 document.getElementById('vault-btn').addEventListener('click', async () => {
   const p = await api.selectVault();
@@ -841,7 +1267,7 @@ document.getElementById('select-vault-btn').addEventListener('click', async () =
 
 // ── Prefs ─────────────────────────────────────────────────────────
 function savePrefs() {
-  api.savePrefs({ theme: currentTheme, fontSize, nodeScale, showLabels, mode: currentMode, linkDepth });
+  api.savePrefs({ theme: currentTheme, fontSize, nodeScale, showLabels, mode: currentMode, linkDepth, customColors, colorBy, panelOpacity });
 }
 
 // ── Resize ────────────────────────────────────────────────────────
